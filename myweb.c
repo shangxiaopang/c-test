@@ -73,7 +73,8 @@ void ioAccept()
 
 void selectAccept()
 {
-	int listenFd,connFd,clientLen,flags,selectCount;
+	int listenFd,connFd,readFd,clientLen,flags,client[FD_SETSIZE];
+	int maxfd,maxi,nready;
 	struct sockaddr_in clientAddr;
 	fd_set read_set,ready_set;
 	char buf[1024];
@@ -83,8 +84,15 @@ void selectAccept()
 		exit(0);
 	}
 	
+	maxfd = listenFd;
+	maxi = -1;
+	
 	//初始化
 	bzero((char *) &clientAddr,sizeof(clientAddr));
+	
+	for(i = 0;i < FD_SETSIZE; i++){
+		client[i] = -1;
+	}
 	
 	FD_ZERO(&read_set);
 	FD_SET(listenFd,&read_set);
@@ -93,15 +101,14 @@ void selectAccept()
 	
 	while(1){
 		ready_set = read_set;
-		if((selectCount = select(listenFd+1,&ready_set,NULL,NULL,NULL)) == -1){
+		if((nready = select(maxfd+1,&ready_set,NULL,NULL,NULL)) == -1){
 			echoError("select");
 			exit(0);
 		}
 		
-		printf("select:%d \n",selectCount);
-		
 		if(FD_ISSET(listenFd,&ready_set)){
 			
+			printf("listen isset! \n");
 			//阻塞等待客户端连接
 			if((connFd = accept(listenFd,(SA *) &clientAddr,&clientLen)) < 0){
 				echoError("accept");
@@ -111,8 +118,45 @@ void selectAccept()
 			flags = fcntl(connFd, F_GETFL, 0);
 			fcntl(connFd, F_SETFL,flags | O_NONBLOCK);
 			
-			doit(connFd);
-			close(connFd);
+			for(i = 0;i < FD_SETSIZE; i++){
+				if(client[i] < 0){
+					client[i] = connFd;
+					break;
+				}
+			}
+			
+			if(i == FD_SETSIZE)
+				printf("too many clients");
+				exit(0);
+			
+			FD_SET(connFd,&read_set);
+			
+			if(connFd > maxfd)
+				maxfd = connFd; 
+			
+			if(i > maxi)
+				maxi = i; 
+			
+			if(--nready <= 0)
+				continue;
+			
+		}
+		
+		printf("for readFd! \n");
+		
+		for(i = 0; i< maxi; i++){
+			if((readFd = client[i]) < 0)
+				continue;
+			if(FD_ISSET(readFd,&ready_set)){
+				
+				doit(connFd);
+				FD_CLR(readFd,&read_set);
+				close(connFd);
+				client[i] = -1;
+				
+				if(--nready <= 0)
+					break;
+			}
 		}
 	}
 }
@@ -178,7 +222,7 @@ void clientMsg(int fd,char *msg)
 	sprintf(buf,"Content-type: text/html \r\n");
 	Rio_writen(fd,buf,strlen(buf));
 	
-	sprintf(buf,"Content-length:%d \r\n\r\n",(int)strlen(body));
+	sprintf(buf,"Content-length: %d \r\n\r\n",(int)strlen(body));
 	
 	Rio_writen(fd,buf,strlen(buf));
 	Rio_writen(fd,body,strlen(body));
