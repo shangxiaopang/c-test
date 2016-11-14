@@ -74,9 +74,9 @@ void ioAccept()
 void selectAccept()
 {
 	int listenFd,connFd,readFd,clientLen,flags,client[FD_SETSIZE];
-	int maxfd,maxi,nready;
+	int maxFd,maxi,nready,i;
 	struct sockaddr_in clientAddr;
-	fd_set read_set,ready_set;
+	fd_set all_set,ready_set;
 	char buf[1024];
 	
 	if((listenFd = openListenFd(8898)) < 0){
@@ -84,7 +84,7 @@ void selectAccept()
 		exit(0);
 	}
 	
-	maxfd = listenFd;
+	maxFd = listenFd;
 	maxi = -1;
 	
 	//初始化
@@ -94,14 +94,14 @@ void selectAccept()
 		client[i] = -1;
 	}
 	
-	FD_ZERO(&read_set);
-	FD_SET(listenFd,&read_set);
+	FD_ZERO(&all_set);
+	FD_SET(listenFd,&all_set);
 	
 	clientLen = sizeof(clientAddr);
 	
 	while(1){
-		ready_set = read_set;
-		if((nready = select(maxfd+1,&ready_set,NULL,NULL,NULL)) == -1){
+		ready_set = all_set;
+		if((nready = select(maxFd+1,&ready_set,NULL,NULL,NULL)) == -1){
 			echoError("select");
 			exit(0);
 		}
@@ -115,43 +115,50 @@ void selectAccept()
 				exit(0);
 			}
 			
-			flags = fcntl(connFd, F_GETFL, 0);
-			fcntl(connFd, F_SETFL,flags | O_NONBLOCK);
+			//flags = fcntl(connFd, F_GETFL, 0);
+			//fcntl(connFd, F_SETFL,flags | O_NONBLOCK);
 			
 			for(i = 0;i < FD_SETSIZE; i++){
 				if(client[i] < 0){
 					client[i] = connFd;
+					printf("connFd:%d \n",connFd);
 					break;
 				}
 			}
 			
-			if(i == FD_SETSIZE)
-				printf("too many clients");
-				exit(0);
-			
-			FD_SET(connFd,&read_set);
-			
-			if(connFd > maxfd)
-				maxfd = connFd; 
-			
-			if(i > maxi)
-				maxi = i; 
-			
-			if(--nready <= 0)
+			if(i == FD_SETSIZE){
+				printf("too many clients \n");
 				continue;
+			}
 			
+			FD_SET(connFd,&all_set);
+			
+			if(connFd > maxFd){
+				maxFd = connFd; 
+			}
+			
+			if(i > maxi){
+				maxi = i; 
+			}
+				
+			if(--nready <= 0){
+				continue;
+			}
 		}
 		
 		printf("for readFd! \n");
 		
-		for(i = 0; i< maxi; i++){
-			if((readFd = client[i]) < 0)
+		for(i = 0; i <= maxi; i++){
+			if((readFd = client[i]) < 0){
 				continue;
+			}
+			
 			if(FD_ISSET(readFd,&ready_set)){
 				
-				doit(connFd);
-				FD_CLR(readFd,&read_set);
-				close(connFd);
+				doit(readFd);
+				clientMsg(readFd,"<html><h1>Hello Word!</h1></html>");
+				FD_CLR(readFd,&all_set);
+				close(readFd);
 				client[i] = -1;
 				
 				if(--nready <= 0)
@@ -176,7 +183,9 @@ void doit(int connFd)
 	sRio_readlineb(&rio,buf,MAXLINE);
 	sscanf(buf, "%s %s %s", method, uri, version);
 	
-	if(strcmp(method,"") || strcmp(uri,"") || strcmp(version,"")){
+	printf("method:%d uri:%d version:%d \n",strcmp(method,""), strcmp(uri,""), strcmp(version,""));
+	
+	if(strcmp(method,"") == 0 || strcmp(uri,"") == 0 || strcmp(version,"") == 0){
 		clientMsg(connFd,"data is error");
 	}else{
 		printf("get request \n");
